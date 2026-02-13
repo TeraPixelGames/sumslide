@@ -1,0 +1,79 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://src/scenes/Menu.gd" id="1_hojwq"]
+
+[node name="Menu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_hojwq")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0784314, 0.0941176, 0.133333, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_constants/separation = 16
+
+[node name="SpacerTop" type="Control" parent="MarginContainer/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "SumSlide"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 56
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/VBox"]
+layout_mode = 2
+text = "Swipe numbers. Clear pairs that sum to 10."
+horizontal_alignment = 1
+
+[node name="StartButton" type="Button" parent="MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Start"
+
+[node name="SoundToggle" type="CheckButton" parent="MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Sound On"
+button_pressed = true
+
+[node name="HowToPlayButton" type="Button" parent="MarginContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "How to Play"
+
+[node name="SpacerBottom" type="Control" parent="MarginContainer/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="HowToPlayPopup" type="AcceptDialog" parent="."]
+unique_name_in_owner = true
+title = "How to Play"
+dialog_text = "Swipe the 5x5 board in any direction.\nEach swipe shifts by one cell and spawns new numbers.\nAdjacent pairs summing to 10 clear for points.\nIf you run out of moves, shuffle the board."
