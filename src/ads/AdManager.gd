@@ -41,6 +41,12 @@ func show_rewarded(placement: String, on_reward: Callable, on_closed: Callable =
 		on_closed.call()
 
 
+func is_rewarded_ready() -> bool:
+	if _provider and _provider.has_method("is_rewarded_ready"):
+		return bool(_provider.call("is_rewarded_ready"))
+	return false
+
+
 func _ensure_project_settings() -> void:
 	if not ProjectSettings.has_setting("sumslide/use_mock_ads"):
 		ProjectSettings.set_setting("sumslide/use_mock_ads", true)

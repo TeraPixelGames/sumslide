@@ -2,7 +2,7 @@ extends Control
 
 const TARGET := 10
 const SWIPE_THRESHOLD := 48.0
-const FREE_SHUFFLES_START := 1
+const MAX_STRIKES := 3
 
 @onready var _score_label: Label = %ScoreLabel
 @onready var _best_label: Label = %BestLabel
@@ -16,7 +16,7 @@ const FREE_SHUFFLES_START := 1
 @onready var _no_moves_overlay: PanelContainer = %NoMovesOverlay
 @onready var _no_moves_label: Label = %NoMovesLabel
 @onready var _rewarded_shuffle_button: Button = %RewardedShuffleButton
-@onready var _free_shuffle_button: Button = %FreeShuffleButton
+@onready var _rewarded_undo_button: Button = %RewardedUndoButton
 @onready var _end_run_button: Button = %EndRunButton
 
 var _rng := RandomNumberGenerator.new()
@@ -24,7 +24,10 @@ var _board := PackedInt32Array()
 var _score := 0
 var _best := 0
 var _combo := 0
-var _free_shuffles_left := FREE_SHUFFLES_START
+var _strikes := 0
+var _undo_used := false
+var _last_state: Dictionary = {}
+var _game_over := false
 var _tracking_swipe := false
 var _swipe_origin := Vector2.ZERO
 var _cell_panels: Array[PanelContainer] = []
@@ -45,15 +48,20 @@ func _wire_signals() -> void:
 	_pause_menu_button.pressed.connect(_on_pause_menu_pressed)
 	_pause_end_run_button.pressed.connect(_on_pause_end_run_pressed)
 	_rewarded_shuffle_button.pressed.connect(_on_rewarded_shuffle_pressed)
-	_free_shuffle_button.pressed.connect(_on_free_shuffle_pressed)
+	_rewarded_undo_button.pressed.connect(_on_rewarded_undo_pressed)
 	_end_run_button.pressed.connect(_on_end_run_pressed)
 
 
 func _start_game_state() -> void:
 	_score = 0
 	_combo = 0
-	_free_shuffles_left = FREE_SHUFFLES_START
+	_strikes = 0
+	_undo_used = false
+	_last_state = {}
+	_game_over = false
+
 	_board = SumSlideRules.create_random_board(_rng)
+	_board = SumSlideRules.ensure_board_has_pair(_board, TARGET, _rng, 30)
 	if RunManager.start_with_shuffle:
 		_board = SumSlideRules.shuffle_board_with_pair(TARGET, _rng, 8)
 		RunManager.start_with_shuffle = false
@@ -62,8 +70,7 @@ func _start_game_state() -> void:
 	_no_moves_overlay.visible = false
 	_refresh_hud()
 	_refresh_board()
-	_update_shuffle_buttons()
-	_check_dead_state()
+	_update_powerup_buttons()
 
 
 func _create_board_cells() -> void:
@@ -93,7 +100,7 @@ func _refresh_hud() -> void:
 	_best = max(_best, _score)
 	_score_label.text = "Score: %d" % _score
 	_best_label.text = "Best: %d" % max(_best, SaveStore.get_high_score("sumslide"))
-	_combo_label.text = "Combo: x%d" % _combo
+	_combo_label.text = "Combo: x%d  Strikes: %d/%d" % [_combo, _strikes, MAX_STRIKES]
 
 
 func _refresh_board() -> void:
@@ -106,22 +113,21 @@ func _refresh_board() -> void:
 		panel.modulate = _cell_color(value)
 
 
-func _check_dead_state() -> void:
-	var no_pairs_now := not SumSlideRules.has_any_pairs(_board, TARGET)
-	var has_potential := SumSlideRules.has_potential_pair_after_any_shift(_board, TARGET)
-	var dead_state := no_pairs_now and not has_potential
-	_no_moves_overlay.visible = dead_state
-	if dead_state:
-		_no_moves_label.text = "No Moves Left"
-	_update_shuffle_buttons()
+func _update_game_over_overlay() -> void:
+	_game_over = _strikes >= MAX_STRIKES
+	_no_moves_overlay.visible = _game_over
+	if _game_over:
+		_no_moves_label.text = "Game Over: 3 Strikes"
 
 
-func _update_shuffle_buttons() -> void:
-	_free_shuffle_button.disabled = _free_shuffles_left <= 0
-	if _free_shuffles_left > 0:
-		_free_shuffle_button.text = "Free Shuffle (%d)" % _free_shuffles_left
-	else:
-		_free_shuffle_button.text = "Free Shuffle (Used)"
+func _update_powerup_buttons() -> void:
+	var rewarded_ready := AdManager.is_rewarded_ready()
+	_rewarded_shuffle_button.visible = rewarded_ready
+	_rewarded_shuffle_button.disabled = not rewarded_ready
+
+	var can_undo := rewarded_ready and not _undo_used and not _last_state.is_empty()
+	_rewarded_undo_button.visible = can_undo
+	_rewarded_undo_button.disabled = not can_undo
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -169,8 +175,12 @@ func _handle_swipe_delta(delta: Vector2) -> void:
 
 
 func _perform_swipe(dir: String) -> void:
+	if _game_over:
+		return
+
+	_last_state = _capture_state()
 	var result := SumSlideRules.step(_board, dir, TARGET, _rng)
-	_board = result.get("board", _board)
+	_board = _to_board(result.get("board", _board))
 	var pairs_cleared := int(result.get("pairs_cleared", 0))
 	var score_delta := int(result.get("score_delta", 0))
 
@@ -180,10 +190,43 @@ func _perform_swipe(dir: String) -> void:
 	else:
 		_combo = 0
 
+	var strike_state: Dictionary = SumSlideRules.apply_strike_state(_strikes, pairs_cleared, MAX_STRIKES)
+	_strikes = int(strike_state.get("strikes", _strikes))
+
 	_score += score_delta
 	_refresh_hud()
 	_refresh_board()
-	_check_dead_state()
+	_update_game_over_overlay()
+	_update_powerup_buttons()
+
+
+func _capture_state() -> Dictionary:
+	return {
+		"board": _board.duplicate(),
+		"score": _score,
+		"combo": _combo,
+		"strikes": _strikes
+	}
+
+
+func _to_board(value: Variant) -> PackedInt32Array:
+	var normalized := PackedInt32Array()
+	normalized.resize(SumSlideRules.BOARD_CELLS)
+
+	if value is PackedInt32Array:
+		var packed: PackedInt32Array = value
+		var count := mini(packed.size(), normalized.size())
+		for i in range(count):
+			normalized[i] = int(packed[i])
+	elif value is Array:
+		var arr: Array = value
+		var arr_count := mini(arr.size(), normalized.size())
+		for i in range(arr_count):
+			normalized[i] = int(arr[i])
+	else:
+		return _board
+
+	return normalized
 
 
 func _on_pause_pressed() -> void:
@@ -203,21 +246,48 @@ func _on_pause_end_run_pressed() -> void:
 
 
 func _on_rewarded_shuffle_pressed() -> void:
-	AdManager.show_rewarded("no_moves_shuffle", Callable(self, "_on_shuffle_reward_granted"))
-
-
-func _on_free_shuffle_pressed() -> void:
-	if _free_shuffles_left <= 0:
+	if not AdManager.is_rewarded_ready():
 		return
-	_free_shuffles_left -= 1
-	_on_shuffle_reward_granted()
+	AdManager.show_rewarded("powerup_shuffle", Callable(self, "_on_shuffle_reward_granted"), Callable(self, "_on_rewarded_closed"))
 
 
 func _on_shuffle_reward_granted() -> void:
-	_board = SumSlideRules.shuffle_board_with_pair(TARGET, _rng, 8)
+	_board = SumSlideRules.shuffle_preserving_distribution(_board, TARGET, _rng, 30)
+	_combo = 0
+	_strikes = 0
+	_game_over = false
 	_no_moves_overlay.visible = false
+	_refresh_hud()
 	_refresh_board()
-	_check_dead_state()
+	_update_powerup_buttons()
+
+
+func _on_rewarded_undo_pressed() -> void:
+	if _undo_used or _last_state.is_empty() or not AdManager.is_rewarded_ready():
+		return
+	AdManager.show_rewarded("powerup_undo", Callable(self, "_on_undo_reward_granted"), Callable(self, "_on_rewarded_closed"))
+
+
+func _on_undo_reward_granted() -> void:
+	if _last_state.is_empty():
+		return
+	_board = _to_board(_last_state.get("board", _board))
+	_score = int(_last_state.get("score", _score))
+	_combo = int(_last_state.get("combo", _combo))
+	_strikes = int(_last_state.get("strikes", _strikes))
+	_game_over = _strikes >= MAX_STRIKES
+	_undo_used = true
+	_last_state = {}
+	_no_moves_overlay.visible = _game_over
+	if _game_over:
+		_no_moves_label.text = "Game Over: 3 Strikes"
+	_refresh_hud()
+	_refresh_board()
+	_update_powerup_buttons()
+
+
+func _on_rewarded_closed() -> void:
+	_update_powerup_buttons()
 
 
 func _on_end_run_pressed() -> void:

@@ -8,6 +8,7 @@ var _closed_callback: Callable = Callable()
 var _reward_granted := false
 var _has_reward_signal := false
 var _has_close_signal := false
+var _rewarded_ready := false
 
 
 func configure(config: Dictionary) -> void:
@@ -60,10 +61,24 @@ func show_rewarded(_placement: String, on_reward: Callable, on_closed: Callable 
 			shown = true
 
 	if not shown:
+		_rewarded_ready = false
 		call_deferred("_fallback_reward_and_close")
 	elif not _has_reward_signal:
 		# No reliable reward callback path from plugin API, fallback to guaranteed reward.
+		_rewarded_ready = false
 		call_deferred("_fallback_reward_and_close")
+	else:
+		_rewarded_ready = false
+
+
+func is_rewarded_ready() -> bool:
+	if _plugin == null:
+		return false
+	if _plugin.has_method("is_rewarded_ad_loaded"):
+		return bool(_plugin.call("is_rewarded_ad_loaded"))
+	if _plugin.has_method("isRewardedLoaded"):
+		return bool(_plugin.call("isRewardedLoaded"))
+	return _rewarded_ready
 
 
 func _load_interstitial() -> void:
@@ -78,6 +93,7 @@ func _load_interstitial() -> void:
 func _load_rewarded() -> void:
 	if _plugin == null or _rewarded_id.is_empty():
 		return
+	_rewarded_ready = false
 	if _plugin.has_method("load_rewarded_ad"):
 		_plugin.call("load_rewarded_ad", _rewarded_id)
 	elif _plugin.has_method("loadRewarded"):
@@ -120,6 +136,10 @@ func _connect_signals() -> void:
 	_has_close_signal = _try_connect("on_rewarded_closed", Callable(self, "_on_reward_closed_signal")) or _has_close_signal
 	_has_close_signal = _try_connect("rewarded_closed", Callable(self, "_on_reward_closed_signal")) or _has_close_signal
 
+	_try_connect("rewarded_ad_loaded", Callable(self, "_on_reward_loaded_signal"))
+	_try_connect("on_rewarded_loaded", Callable(self, "_on_reward_loaded_signal"))
+	_try_connect("rewarded_loaded", Callable(self, "_on_reward_loaded_signal"))
+
 
 func _try_connect(signal_name: String, callback: Callable) -> bool:
 	if _plugin == null or not _plugin.has_signal(signal_name):
@@ -131,6 +151,10 @@ func _try_connect(signal_name: String, callback: Callable) -> bool:
 
 func _on_reward_signal(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
 	_emit_reward_once()
+
+
+func _on_reward_loaded_signal(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
+	_rewarded_ready = true
 
 
 func _on_reward_closed_signal(_arg1: Variant = null, _arg2: Variant = null, _arg3: Variant = null) -> void:
